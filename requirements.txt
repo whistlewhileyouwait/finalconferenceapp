@@ -14,4 +14,4 @@ numpy
 Pillow
 opencv-python-headless
 qrcode
-dotenv
+python-dotenv
