@@ -10,6 +10,8 @@ from PIL import Image
 from pyzbar.pyzbar import decode
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from database import get_all_attendees, log_scan
+from database import get_scan_log
 
 # Load environment variables
 load_dotenv()
@@ -44,17 +46,7 @@ conference_sessions = [
     {"title": "Legal and Strategy Aspects of Deregistration", "start": "2025-05-04 13:30", "end": "2025-05-04 15:00"},
     {"title": "RNR Approach to Adolescent Assessment", "start": "2025-05-04 15:30", "end": "2025-05-04 17:00"},
 ]
-import os
-import datetime
-import pandas as pd
-import streamlit as st
-import qrcode
-import numpy as np
-import cv2
-from io import BytesIO
-from PIL import Image
-from dotenv import load_dotenv
-from supabase import create_client, Client
+
 
 # ─── Load .env & initialize Supabase client ───────────────────────────────
 load_dotenv()
@@ -119,38 +111,45 @@ def run_qr_scanner():
     st.success(f"✅ Scanned and checked in: {name}")
 
 
-def generate_ce_report() -> pd.DataFrame:
-    logs = get_scan_log()
-    attendees = get_all_attendees()
-    attendee_map = {a["badge_id"]: {"Name": a["name"], "Email": a["email"]} for a in attendees}
-    report = {}
+def generate_ce_report(sessions=None):
+    """
+    Given a list of session dicts (with 'title','start','end'),
+    returns a DataFrame marking ✅ for each attendee who scanned
+    during each session window.
+    """
+    if sessions is None:
+        sessions = conference_sessions
 
-    for sess in conference_sessions:
-        start = datetime.datetime.strptime(sess["start"], "%Y-%m-%d %H:%M")
-        end   = datetime.datetime.strptime(sess["end"],   "%Y-%m-%d %H:%M")
-        title = sess["title"]
+    logs = get_scan_log()  # list of {badge_id, name, email, timestamp}
+    rows = {}
 
-        for log in logs:
-            bid = log["badge_id"]
-            ts  = log["timestamp"]
-            if bid not in attendee_map or not (start <= ts <= end):
-                continue
-            report.setdefault(bid, {
-                "Name":  attendee_map[bid]["Name"],
-                "Email": attendee_map[bid]["Email"]
-            })[title] = "✅"
+    for log in logs:
+        bid, ts = log["badge_id"], log["timestamp"]
 
-    # fill in blanks
-    for badge_data in report.values():
-        for sess in conference_sessions:
-            badge_data.setdefault(sess["title"], "")
+        # initialize this attendee’s row
+        if bid not in rows:
+            rows[bid] = {
+                "Badge ID": bid,
+                "Name":     log["name"],
+                "Email":    log["email"]
+            }
+            for sess in sessions:
+                rows[bid][sess["title"]] = ""
 
-    return pd.DataFrame(report.values())
+        # check each session window
+        for sess in sessions:
+            start = datetime.datetime.strptime(sess["start"], "%Y-%m-%d %H:%M")
+            end   = datetime.datetime.strptime(sess["end"],   "%Y-%m-%d %H:%M")
+            if start <= ts <= end:
+                rows[bid][sess["title"]] = "✅"
 
-import datetime  # make sure this is imported at the top
+    # ensure all session columns exist for everyone
+    for bid in rows:
+        for sess in sessions:
+            rows[bid].setdefault(sess["title"], "")
 
-import datetime
-import pandas as pd
+    return pd.DataFrame(rows.values())
+
 
 def generate_flattened_log():
     # 1) Fetch registered attendees
@@ -194,24 +193,43 @@ if st.session_state.page == 'home':
     # QR scanner
     run_qr_scanner()
 
-    # Manual badge ID
-    st.subheader("🔢 Manual Check‑In by Badge ID")
+# Manual badge ID
+    st.subheader("🔢 Manual Check-In by Badge ID")
     badge_input = st.text_input("Enter Badge ID", key="manual_badge")
+
     if st.button("Check In", key="checkin_manual"):
         if badge_input:
+        # 1) Record the scan
             log_scan(badge_input)
-            st.success(f"✅ Checked in: {badge_input}")
+
+        # 2) Fetch name (none → resp.data is None)
+            resp = (
+                supabase
+                .table("attendees")
+                .select("name")
+                .eq("badge_id", int(badge_input))
+                .maybe_single()
+                .execute()
+            )
+            if resp is not None and resp.data:
+                name = resp.data.get("name", badge_input)
+            else:
+                name = badge_input
+
+        # 4) Show the confirmation
+            st.success(f"✅ Checked in: {name}")
         else:
             st.warning("Please enter a valid badge ID.")
 
-    # Manual name lookup
-    st.subheader("👤 Manual Check‑In by Name")
+    st.subheader("👤 Manual Check-In by Name")
     people = get_all_attendees()
-    names  = [f"{p['name']} ({p['badge_id']})" for p in people]
+    names = [f"{p['name']} ({p['badge_id']})" for p in people]
     selection = st.selectbox("Select Attendee", names, index=0)
+
     if st.button("Check In Selected", key="checkin_select"):
         bid = int(selection.split("(")[-1].rstrip(")"))
         log_scan(bid)
+        # lookup the person’s name for that badge
         name = next(p["name"] for p in people if p["badge_id"] == bid)
         st.success(f"✅ Checked in: {name} ({bid})")
 
@@ -219,34 +237,115 @@ if st.session_state.page == 'home':
     if st.button("🔐 Admin Area"):
         switch_page('admin')
 
-
 elif st.session_state.page == 'admin':
     st.title("🔐 Admin – Attendance Dashboard")
 
-    df_all = generate_flattened_log()
+    # ← Back to Home
+    if st.button("⬅ Back to Home"):
+        switch_page('home')
 
     st.subheader("👥 All Registered Attendees")
-    st.write(f"Showing {len(df_all)} attendees in numeric order")
+
+    # 1) Fetch attendees & raw scan log
+    attendees = get_all_attendees()   # list of dicts with int badge_id
+    logs      = get_scan_log()        # list of dicts with badge_id (str), timestamp (datetime or repr)
+
+    # 2) Build badge_id → sorted list of timestamp strings
+    scans_map: dict[int, list[str]] = {}
+    for entry in logs:
+        # normalize badge_id to int
+        try:
+            bid = int(entry["badge_id"])
+        except Exception:
+            bid = entry["badge_id"]
+
+        # normalize timestamp to datetime
+        ts = entry["timestamp"]
+        if isinstance(ts, str) and ts.startswith("datetime.datetime"):
+            # strip off the wrapper: datetime.datetime(…)
+            inner = ts.replace("datetime.datetime(", "").rstrip(")")
+            ts = datetime.datetime.fromisoformat(inner)
+        elif isinstance(ts, str):
+            ts = datetime.datetime.fromisoformat(ts)
+
+        # format and collect
+        s = ts.strftime("%Y-%m-%d %H:%M:%S")
+        scans_map.setdefault(bid, []).append(s)
+
+    # sort each attendee’s scans chronologically
+    for bid in scans_map:
+        scans_map[bid].sort()
+
+    # 3) Assemble rows for the DataFrame
+    rows = []
+    for person in attendees:
+        bid   = person["badge_id"]
+        times = scans_map.get(bid, [])
+        rows.append({
+            "Badge ID":  bid,
+            "Name":       person["name"],
+            "Email":      person["email"],
+            "All Scans":  ", ".join(times)
+        })
+
+    # 4) Render table & download button
+    df_all = pd.DataFrame(rows)
     st.dataframe(df_all)
     st.download_button(
-    "📥 Download Full Attendee List",
-    df_all.to_csv(index=False).encode("utf-8"),
-    file_name="all_attendees.csv"
-)
+        "📥 Download Attendees with Scans",
+        data=df_all.to_csv(index=False).encode("utf-8"),
+        file_name="attendees_with_scans.csv",
+        mime="text/csv"
+    )
 
     st.markdown("---")
 
-    # CE Credit report
+    # ─── CE Credit report ───────────────────────────────────────────────────────
     st.subheader("📜 CE Credit Attendance Report")
-    df_ce = generate_ce_report()
-    st.dataframe(df_ce)
-    st.download_button("📥 Download CE Credit Report",
-                       df_ce.to_csv(index=False).encode("utf-8"),
-                       file_name="ce_credits.csv")
+
+    # Conference dates
+    min_date = datetime.date(2025, 5, 2)
+    max_date = datetime.date(2025, 5, 4)
+
+    # Default to today if it’s in range, otherwise the first conference day
+    today = datetime.date.today()
+    default_date = today if min_date <= today <= max_date else min_date
+
+    # Let the user pick a date within the conference window
+    selected_date = st.date_input(
+        "Select conference date",
+        value=default_date,
+        min_value=min_date,
+        max_value=max_date,
+    )
+
+    # Filter sessions to that day
+    sessions_for_day = [
+        s for s in conference_sessions
+        if datetime.datetime.strptime(s["start"], "%Y-%m-%d %H:%M").date()
+        == selected_date
+    ]
+
+    if not sessions_for_day:
+        st.info(f"No sessions scheduled for {selected_date}.")
+    else:
+        # Generate & display the report for just those sessions
+        df_ce = generate_ce_report(sessions_for_day)
+        st.dataframe(df_ce)
+        st.download_button(
+            "📥 Download CE Credit Report",
+            data=df_ce.to_csv(index=False).encode("utf-8"),
+            file_name=f"ce_report_{selected_date}.csv",
+            mime="text/csv"
+        )
+        # … after your CE‐report block …
+        if st.button("💾 Save CE Report to Supabase"):
+            from database import save_ce_report
+            save_ce_report(df_ce, selected_date)
+            st.success(f"CE report for {selected_date} saved ({len(df_ce)} attendees).")
 
     st.markdown("---")
 
-    
     st.subheader("📊 Raw Attendance Log")
     raw = get_scan_log()
     df_raw = pd.DataFrame(raw)
@@ -258,33 +357,52 @@ elif st.session_state.page == 'admin':
 )
 
 
+# — your usual init —
+load_dotenv()
+supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
-    # Navigation
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("➕ Register New Attendee"):
-            switch_page('register')
-    with col2:
-        if st.button("⬅ Back to Home"):
-            switch_page('home')
+def get_next_badge_id():
+    # pull the single highest badge_id, descending, limit=1
+    resp = (
+      supabase
+        .table("attendees")
+        .select("badge_id")
+        .order("badge_id", desc=True)
+        .limit(1)
+        .execute()
+    )
+    data = resp.data or []
+    if data:
+        return data[0]["badge_id"] + 1
+    return 1
 
+# — in your Streamlit layout, e.g. sidebar —
+st.sidebar.header("➕ Quick Register")
 
-elif st.session_state.page == 'register':
-    st.title("➕ Register New Attendee")
-
+next_id = get_next_badge_id()
+with st.sidebar.form("quick_register"):
     name     = st.text_input("Full Name")
     email    = st.text_input("Email")
-    badge_id = st.number_input("Assign a Unique Badge ID", min_value=1, step=1)
+    # pre-fill and lock the badge field
+    badge_id = st.number_input(
+        "Badge ID",
+        min_value=1,
+        value=next_id,
+        disabled=True
+    )
+    submitted = st.form_submit_button("Register")
 
-    if st.button("Register"):
-        if name and email and badge_id:
-            register_attendee(badge_id, name, email)
-            st.success(f"🎉 Registered {name}")
-            qr = generate_qr_code(badge_id)
-            st.image(qr, caption=f"QR Code for {name}")
-        else:
-            st.warning("Please fill in all fields.")
+if submitted:
+    try:
+        supabase.table("attendees").insert({
+            "badge_id": int(badge_id),
+            "name":     name,
+            "email":    email
+        }).execute()
+        st.sidebar.success(f"Registered {name} (# {badge_id})")
+    except Exception as e:
+        st.sidebar.error(f"Failed to register: {e}")
+
 
     if st.button("⬅ Back to Admin"):
         switch_page('admin')
