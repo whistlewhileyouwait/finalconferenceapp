@@ -1,0 +1,6 @@
+tasks:
+  - init: |
+      sudo apt-get update
+      sudo apt-get install -y libgl1-mesa-glx
+      pip install -r requirements.txt
+  - command: streamlit run app.py --server.address=0.0.0.0 --server.port=8080
