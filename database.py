@@ -1,5 +1,6 @@
-# database.py
-
+# # database.py
+from zoneinfo import ZoneInfo
+import pandas as pd
 import os
 import datetime
 from dotenv import load_dotenv
@@ -36,7 +37,8 @@ def log_scan(badge_id: int):
     2) Update next empty scanN column in attendees
     """
     badge = int(badge_id)
-    now_iso = datetime.datetime.utcnow().isoformat()
+    local_tz = ZoneInfo("America/Chicago")
+    now_iso  = datetime.datetime.now(local_tz).isoformat()
 
     # 1) raw log
     supabase.table("scanlog") \
@@ -98,3 +100,28 @@ def get_scan_log():
             "timestamp": ts
         })
     return logs
+def save_ce_report(df: pd.DataFrame, report_date: datetime.date):
+    """
+    Expect df like:
+       Badge ID | Name | Email | [session1] | [session2] | ...
+    This will melt it to one row per session and insert into ce_reports.
+    """
+    # melt wide→long
+    id_vars = ["Badge ID", "Name", "Email"]
+    value_vars = [c for c in df.columns if c not in id_vars]
+    df_long = (
+        df
+        .melt(id_vars=id_vars, value_vars=value_vars,
+              var_name="session_title", value_name="attended_mark")
+        # convert "✅"→True, ""→False
+        .assign(
+            badge_id       = lambda d: d["Badge ID"].astype(int),
+            attended       = lambda d: d["attended_mark"] == "✅",
+            report_date    = report_date
+        )
+        .loc[:, ["badge_id","session_title","attended","report_date"]]
+    )
+
+    # insert into Supabase
+    records = df_long.to_dict(orient="records")
+    supabase.table("ce_reports").insert(records).execute()
