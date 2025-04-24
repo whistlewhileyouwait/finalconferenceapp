@@ -7,7 +7,6 @@ import cv2
 import os
 from io import BytesIO
 from PIL import Image
-from pyzbar.pyzbar import decode
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from database import get_all_attendees, log_scan
@@ -96,11 +95,18 @@ def run_qr_scanner():
         return
 
     img = Image.open(img_file).convert("RGB")
-    gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-    data, _, _ = cv2.QRCodeDetector().detectAndDecode(gray)
-    if not data:
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    data, points, _ = qr_detector.detectAndDecode(gray)
+    if data:
+        try:
+            badge = int(data)
+        except ValueError:
+            st.warning(f"Unrecognized QR payload: {data}")
+        else:
+            log_scan(badge)
+            st.success(f"✅ Checked in: {badge}")
+    else:
         st.warning("⚠ QR Code not recognized.")
-        return
 
     badge_id = data.strip()
     log_scan(badge_id)
