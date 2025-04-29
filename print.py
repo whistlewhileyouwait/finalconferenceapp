@@ -74,7 +74,7 @@ def create_badge_pdf(attendees):
         # Create the back side of the badge
         c.rect(x_margin, height - y_margin - BADGE_HEIGHT_INCH * inch, BADGE_WIDTH_INCH * inch, BADGE_HEIGHT_INCH * inch)
 
-        c.setFont("Helvetica", 10)
+        c.setFont("Helvetica", 8)
         notes = [
             "FOR CE CREDITS:",
             "Scan in when you arrive each day",
