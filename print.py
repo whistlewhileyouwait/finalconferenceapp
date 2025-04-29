@@ -48,5 +48,17 @@ for idx, attendee in enumerate(attendees):
             margin-bottom: 10px;
         ">
             <div>
-                <h2 style='margin: 0; font-size: 20px'>{attendee
+                <h2 style='margin: 0; font-size: 20px'>{attendee['name']}</h2>
+                <p style='margin: 4px 0; font-size: 12px'>{attendee['email']}</p>
+                <p style='margin: 4px 0; font-size: 12px'>Badge #: {attendee['badge_id']}</p>
+            </div>
+            <div style="text-align: center;">
+                <img src="{qr_img_src}" width="80" height="80" />
+            </div>
+        </div>
+        """
 
+        st.markdown(badge_html, unsafe_allow_html=True)
+
+# Print instructions
+st.markdown("⬇️ **Copy and paste into Word/Docs to print.** Each badge is sized 2.3×3.4 inches for vertical holders.")
