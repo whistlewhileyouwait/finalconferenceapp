@@ -1,81 +1,6 @@
 import streamlit as st
 import qrcode
 from io import BytesIO
-from PIL import Image
-from database import get_all_attendees  # Or however you fetch data
-
-st.set_page_config(layout="wide")
-st.title("🪪 Badge Generator")
-
-# Layout settings
-BADGES_PER_ROW = 3
-
-def generate_qr_code(data):
-    qr = qrcode.QRCode(box_size=2, border=1)
-    qr.add_data(data)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white")
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
-
-# Fetch all attendees
-attendees = get_all_attendees()
-cols = st.columns(BADGES_PER_ROW)
-
-for idx, attendee in enumerate(attendees):
-    col = cols[idx % BADGES_PER_ROW]
-    with col:
-        qr_data = attendee["badge_number"]
-        qr_img_src = generate_qr_code_base64(qr_data)
-
-        badge_html = f"""
-        <div style="
-            width: 2.3in;
-            height: 3.4in;
-            border: 1px solid black;
-            padding: 10px;
-            box-sizing: border-box;
-            font-family: Arial, sans-serif;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        ">
-            <div>
-                <h2 style='margin: 0; font-size: 20px'>{attendee['name']}</h2>
-                <p style='margin: 4px 0; font-size: 12px'>{attendee['email']}</p>
-                <p style='margin: 4px 0; font-size: 12px'>Badge #: {attendee['badge_number']}</p>
-            </div>
-            <div style="text-align: center;">
-                <img src="{qr_img_src}" width="80" height="80" />
-            </div>
-        </div>
-        """
-
-        st.markdown(badge_html, unsafe_allow_html=True)
-
-# Show instructions
-st.markdown("⬇️ **Copy and paste these into a Word or Docs template.** Each badge is roughly 2.3×3.4 in when printed 3 across a page.")
-
-# Layout in rows
-cols = st.columns(BADGES_PER_ROW)
-for idx, attendee in enumerate(attendees):
-    col = cols[idx % BADGES_PER_ROW]
-
-    with col:
-        st.markdown("---")
-        st.markdown(f"**Name:** {attendee['name']}")
-        st.markdown(f"**Email:** {attendee['email']}")
-        st.markdown(f"**Badge #:** {attendee['badge_number']}")
-        
-        # QR code content can be just the badge number or full name
-        qr_data = f"{attendee['badge_number']}"
-        qr_img_bytes = generate_qr_code(qr_data)
-        st.image(qr_img_bytes, width=80)  # Adjust to fit visually
-        st.markdown("---")
-      import streamlit as st
-import qrcode
-from io import BytesIO
 import base64
 from database import get_all_attendees
 
@@ -94,4 +19,16 @@ def generate_qr_code_base64(data):
     img_str = base64.b64encode(buffered.getvalue()).decode()
     return f"data:image/png;base64,{img_str}"
 
+attendees = get_all_attendees()
+cols = st.columns(BADGES_PER_ROW)
 
+for idx, attendee in enumerate(attendees):
+    col = cols[idx % BADGES_PER_ROW]
+    with col:
+        qr_data = str(attendee["badge_id"])  # Make sure badge_id exists in your table
+        qr_img_src = generate_qr_code_base64(qr_data)
+
+        badge_html = f"""
+        <div style="
+            width: 2.3in;
+            height
