@@ -12,7 +12,6 @@ from supabase import create_client, Client
 from database import get_all_attendees, log_scan
 from database import get_scan_log
 
-from database import register_attendee, get_all_attendees, log_scan, get_scan_log, save_ce_report
 # ─── Load .env & initialize Supabase client ───────────────────────────────
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -26,9 +25,14 @@ from database import (
     get_scan_log,
 )
 
+# ─── Page‑swap helper (only once) ─────────────────────────────────────────
 def switch_page(page_name: str):
     st.session_state.page = page_name
     st.experimental_rerun()
+
+# ─── Init page state ────────────────────────────────────────────────────────
+if 'page' not in st.session_state:
+    st.session_state.page = 'home'
 # Initialize Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
