@@ -55,15 +55,6 @@ conference_sessions = [
 
 
 
-# ─── Page‑swap helper ───────────────────────────────────────────────────────
-def switch_page(page_name: str):
-    st.session_state.page = page_name
-
-]
-
-# ─── Init page state ────────────────────────────────────────────────────────
-if 'page' not in st.session_state:
-    st.session_state.page = 'home'
 
 
 # ─── Utility functions ─────────────────────────────────────────────────────
