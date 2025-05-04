@@ -1,3 +1,10 @@
+
+
+
+
+
+
+
 def generate_ce_report():
     # 1) Load your data
     attendees = get_all_attendees()   # list of dicts { "badge_id", "name", "email", … }
