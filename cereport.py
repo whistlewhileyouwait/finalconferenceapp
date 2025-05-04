@@ -120,11 +120,16 @@ def run_qr_scanner():
 def generate_ce_report():
     # 1) Load your data
     attendees = get_all_attendees()   # list of dicts { "badge_id", "name", "email", … }
-    raw_logs  = get_scan_log()        # list of dicts { "badge_id", "name", "email", "timestamp" (datetime) }
+    logs = get_scan_log()
+    # DEBUG: show me the first few log entries and their types
+    st.write("Raw logs preview:", logs[:5])
+    for e in logs[:5]:
+        st.write(type(e["timestamp"]), e["timestamp"])
+    …
 
     # 2) Group all scan timestamps by badge_id
     scans_by = {}
-    for entry in raw_logs:
+    for entry in logs:
         bid = entry["badge_id"]
         scans_by.setdefault(bid, []).append(entry["timestamp"])
 
