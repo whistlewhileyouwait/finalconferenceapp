@@ -154,6 +154,7 @@ def generate_ce_report():
     df = pd.DataFrame(rows)
     return df.sort_values("Badge ID").reset_index(drop=True)
 
+
 def generate_flattened_log():
     # 1) Fetch registered attendees
     attendees = get_all_attendees()   # list of dicts: { badge_id, name, email, … }
